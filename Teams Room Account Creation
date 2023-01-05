@@ -1,83 +1,69 @@
-Prerequisites:
+# Prerequisites:
 
-// Azure AD PowerShell for Graph module
+# This script assumes that you have a CSV file with the following columns:
+
+# Name: the name of the user
+# Alias: the alias (username) for the user
+# UPN: the user principal name (email address) for the user
+# DisplayName: the display name for the user
+# Password: the Password for the user
+# PhoneNumber: the Phone number for the user, formatted with country code such as: +14255553223
+# LocationID: the Location ID for the user
+# The script will create a mailbox for each user and set it as a room mailbox, and then it will create a Microsoft Teams Room resource account for each user and configure it accordingly
+
+# Azure AD PowerShell for Graph module
 
 Install-Module -Name AzureAD
 
-// Exchange Online PowerShell Module
+# Exchange Online PowerShell Module
 
 Install-Module -Name ExchangeOnlineManagement
 
-// Microsoft Teams PowerShell Module
+# Microsoft Teams PowerShell Module
 
 Install-Module -Name MicrosoftTeams
 
+# Import all modules
 
+Import-Module ExchangeOnlineManagement
+Import-Module MicrosoftTeams
+Import-Module AzureAD
 
-Identify room -> Does Resource exist? -> if no, create resource in exchange -> configure calendar auto accept -> set password to never expire -> assign teams license -> configure teams rooms
-
-//Create Room Mailbox
-
-New-Mailbox -Name $acctUpn -Alias $MailBoxAlias -Room -DisplayName $DisplayName -EnableRoomMailboxAccount $true -RoomMailboxPassword (ConvertTo-SecureString -String $Password -AsPlainText -Force)
-
-// Set Outlook to auto-accept meeting invites and add additional response
-
-Set-CalendarProcessing -Identity $MailboxAlias -AutomateProcessing AutoAccept -AddOrganizerToSubject $false -DeleteComments $false -DeleteSubject $false -RemovePrivateProperty $false -ProcessExternalMeetingMessages $true -AdditionalResponse "This is a Microsoft Teams Meeting Room!"
-
-
-// Set password to never expire and set usage location
-
-Set-AzureADUser -ObjectID $acctUpn -PasswordPolicies DisablePasswordExpiration
-
-Set -AzureADUser -ObjectID ConferenceRoom01@contoso.com UsageLocation 'US'
-
-// Create an object for a single license type if desired
-
+# Create an object for a single license type if desired
 $License = New-Object -TypeName Microsoft.Open.AzureAD.Model.AssignedLicense
-
 $License.SkuId = $ADLicense
 
-// Create an object for a multiple license type if desired
-
+# Create an object for a multiple license type if desired
 $Licenses = New-Object -TypeName Microsoft.Open.AzureAD.Model.AssignedLicenses
 
-// Add the single license object to the multiple license object
-
+# Add the single license object to the multiple license object
 $Licenses.AddLicenses = $License
 
-// Assign the license to the resource account
+# Load the user list from the spreadsheet
+$users = Import-Csv -Path 'C:\users\Name\Desktop\userlist.csv'
 
-Set-AzureADUserLicense -ObjectId ConferenceRoom01@contoso.com -AssignedLicenses $Licenses
-
-// OPTIONAL SETTINGS
-// Additional information to be included in responses to meeting requests
-
+# Configure Additional Response Variable
 $AdditionalResponse=@" <hr style="font-family: Calibri, Arial, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);"><p align="center"><img width="291" height="137"src=https://images.contoso.com/msc17_collaboration_002.png></p><p align="center">This room is equipped with One Touch Join - Did you make this a Microsoft Teams or Skype for Business meeting?</p><p align="center">Become a meeting ninja - <a href=https://aka.ms/TeamsRoomVideo>watch this short video</a>!</p><p align="center"><br></p><hr><img style="margin-right: auto; margin-left: auto; float: none; display: block;"src=https://images.contoso.com/2020/03/contoso-icon.png>"@
 
-Set-CalendarProcessing -Identity $MailboxAlias -AddAdditionalResponse $true -AdditionalResponse $AdditionalResponse
 
-// prevent mailbox from filling up with voicemail
-
-New-CsTeamsCallingPolicy -Identity NoVoiceMail -Description "Do not permit user to have voicemail" -AllowVoicemail AlwaysDisabled
-
-Grant-CsTeamsCallingPolicy -Identity MTR-TVW-Conference1 -PolicyName NoVoiceMail
-
-// MailTips enablement, tells users a message in the InfoBar in Outlook
-
-Set-Mailbox -Identity $MailboxAlias -MailTip "This room is equipped to support Microsoft Teams meetings"
-
-// Assigning Phone Number
-
-$acctUpn= 'MTR-SEA-FocusRoom1@teamsroomslab.com'
-
-$PhoneNumber='+14255553223'
-
-#Get Location ID via Get-CsOnlineLisLocation
-
-$LocationID='c04255ef-0aac-4cc8-b5fe-510c4578f792'
-
-Set-CsPhoneNumberAssignment -Identity $AcctUPN -PhoneNumber $PhoneNumber -LocationID $LocationID -PhoneNumberType CallingPlan
-
-// Places
-
-Set-Place 'MTR-TVW-Conference' -IsWheelChairAccessible $true -Capacity 12 -DisplayDeviceName $True // see more examples online for advanced controls of Set-Place
+# Loop through the users in the list
+foreach ($user in $users) {
+  # Create Mailbox
+  New-Mailbox -MicrosoftOnlineServicesID $user.UPN -Name $user.Name -Alias $user.Alias -Room -DisplayName $user.DisplayName -EnableRoomMailboxAccount $true -RoomMailboxPassword (ConvertTo-SecureString -String $user.Password -AsPlainText -Force)
+  # Set Outlook to auto-accept meeting invites and add additional response
+  Set-CalendarProcessing -Identity $user.Alias -AutomateProcessing AutoAccept -AddOrganizerToSubject $true -DeleteComments $false -DeleteSubject $false -RemovePrivateProperty $false -ProcessExternalMeetingMessages $true -AdditionalResponse $AdditionalResponse
+  # Set password to never expire and set usage location
+  Set-AzureADUser -ObjectID $user.UPN -PasswordPolicies DisablePasswordExpiration -UsageLocation 'US'
+  # Assign licensing to the resource account
+  Set-AzureADUserLicense -ObjectID $user.UPN -AssignedLicenses $Licenses
+  # Prevent mailbox from filling up with voicemail
+  New-CsTeamsCallingPolicy -Identity NoVoiceMail -Description "Do not permit user to have voicemail" -AllowVoicemail AlwaysDisabled
+  Grant-CsTeamsCallingPolicy -Identity $user.Alias -PolicyName NoVoiceMail
+  # MailTips
+  Set-Mailbox -Identity $user.Alias -MailTip "This Room is equipped to support Microsoft Teams meetings"
+  # Assign Phone Number
+  Set-CsPhoneNumberAssignment -Identity $user.Alias -Phonenumber $user.PhoneNumber -LocationID $user.LocationID -PhoneNumberType CallingPlan
+  # Places
+  Set-Place -Identity $user.Alias -IsWheelChairAccessible $true -Capacity 12 -DisplayDeviceName $true -MTREnabled $true
+  
+  
