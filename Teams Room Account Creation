@@ -65,5 +65,5 @@ foreach ($user in $users) {
   Set-CsPhoneNumberAssignment -Identity $user.Alias -Phonenumber $user.PhoneNumber -LocationID $user.LocationID -PhoneNumberType CallingPlan
   # Places
   Set-Place -Identity $user.Alias -IsWheelChairAccessible $true -Capacity 12 -DisplayDeviceName $true -MTREnabled $true
-  
+ 
   
